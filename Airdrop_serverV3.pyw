@@ -92,7 +92,6 @@ def upload():
                 return "File rejected by user", 403
         path = os.path.abspath(filename)
         file.save(path)
-        share_file_path = path
         notify(f"Received and set share path: {filename}")
         return f"Uploaded {filename}!"
     elif "text" in request.form:
@@ -187,4 +186,5 @@ def run_server():
 threading.Thread(target=run_server, daemon=True).start()
 # Launch tray icon (blocks)
 start_tray()
+print(get_local_ip())
 
