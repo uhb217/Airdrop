@@ -4,16 +4,16 @@ import pyperclip
 from win10toast_click import ToastNotifier
 import threading
 import pystray
+import requests
 from PIL import Image
 import pymsgbox
 import tkinter as tk
 from tkinter import filedialog
+from zeroconf import ServiceInfo, Zeroconf
 import socket
-import smtplib
-from email.mime.text import MIMEText
 import keyboard
-from dotenv import load_dotenv
-load_dotenv()
+import time
+import uuid
 
 app = Flask(__name__)
 
@@ -23,39 +23,18 @@ notifier = ToastNotifier()
 share_file_path = None
 port = 5000
 require_confirmation = False
+DOWNLOAD = "D$&@"
+IP = "IP$&@"
+data = "null"
 
-
-def get_local_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def trigger_pushcut_notification(DATA="null"):
+    global data
+    data = DATA
+    url = "https://api.pushcut.io/E9THLwP-EaJiG__zhR_0c/notifications/Airdrop%F0%9F%9A%80"
     try:
-        # Doesn't have to be reachable
-        s.connect(("10.255.255.255", 1))
-        ip = s.getsockname()[0]
-    except Exception:
-        ip = "127.0.0.1"
-    finally:
-        s.close()
-    return f'http://{ip}:{port}'
-def mail(body):
-    def send_mail(body):
-        user = os.getenv("AIRMAIL_USER")
-        pwd = os.getenv("AIRMAIL_PWD")
-        to_email = os.getenv("AIRMAIL_TO")
-        msg = MIMEText(body)
-        msg["Subject"] = "Airdrop"
-        msg["From"] = user
-        msg["To"] = to_email
-        try:
-            with smtplib.SMTP("smtp.gmail.com", 587) as server:
-                server.starttls()
-                server.login(user, pwd)
-                server.send_message(msg)
-        except Exception as e:
-            print(f"Error: {e}")
-    threading.Thread(target=send_mail, args=(body,), daemon=True).start()
-
-
-# Helper to send Windows toast notifications
+        requests.post(url, verify=False)
+    except Exception as e:
+        print(f"Failed to send Pushcut notification: {e}")
 def notify(message):
     notifier.show_toast(
         "Airdrop_server",
@@ -64,8 +43,6 @@ def notify(message):
         duration=5,
         threaded=True,
     )
-
-
 def error_notify(message):
     notifier.show_toast(
         "Airdrop_server Error",
@@ -75,6 +52,46 @@ def error_notify(message):
         threaded=True,
     )
 
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+    finally:
+        s.close()
+    return ip
+
+def start_mdns_service():
+    global zeroconf
+    zeroconf = Zeroconf()
+
+    hostname = socket.gethostname()
+    ip = get_local_ip()
+
+    service_info = ServiceInfo(
+        "_http._tcp.local.",
+        "airdrop._http._tcp.local.",
+        addresses=[socket.inet_aton(ip)],
+        port=port,
+        properties={"version": "1.0"},
+        server="airdrop.local.",
+    )
+
+    try:
+        zeroconf.register_service(service_info)
+        print(f"[mDNS] Service registered as airdrop.local on IP {ip}:{port}")
+    except Exception as e:
+        print(f"[mDNS] Failed to register mDNS service: {e}")
+
+
+def on_exit(icon, item):
+    try:
+        zeroconf.unregister_all_services()
+        zeroconf.close()
+        print("[mDNS] Unregistered service.")
+    except:
+        pass
+    icon.stop()
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -90,7 +107,12 @@ def upload():
             )
             if confirm != "Yes":
                 return "File rejected by user", 403
-        path = os.path.abspath(filename)
+        UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        timestamp_str = str(int(time.time()))[7:]
+        unique_id = uuid.uuid4().hex[:6]
+        filename = f"image_{timestamp_str}_{unique_id}.png"
+        path = os.path.join(UPLOAD_DIR, filename)
         file.save(path)
         notify(f"Received and set share path: {filename}")
         return f"Uploaded {filename}!"
@@ -109,8 +131,6 @@ def upload():
         notify("Received text and copied to clipboard.")
         return "Text copied to clipboard!"
     return "No valid data provided", 400
-
-
 @app.route("/download", methods=["GET"])
 def download():
     if share_file_path and os.path.exists(share_file_path):
@@ -118,7 +138,9 @@ def download():
     else:
         error_notify("No file available at the saved path.")
         return abort(404, description="No file available for download")
-
+@app.route("/actionManager", methods=["GET"])
+def action_manager():
+    return data
 
 def select_file_to_share():
     def open_file_dialog():
@@ -129,7 +151,7 @@ def select_file_to_share():
             path = filedialog.askopenfilename(title="Select file to share", parent=root)
             if path:
                 share_file_path = path
-                mail('D$&@')
+                trigger_pushcut_notification(DOWNLOAD)
                 notify(f"Share path set: {os.path.basename(path)}")
         except Exception as e:
             error_notify(f"Error selecting file: {e}")
@@ -162,7 +184,7 @@ def start_tray():
             toggle_confirmation,
         ),
         pystray.MenuItem("Share File", lambda icon, item: select_file_to_share()),
-        pystray.MenuItem("Quit", lambda icon, item: icon.stop()),
+        pystray.MenuItem("Quit",on_exit),
     )
     tray = pystray.Icon("Airdrop_server", img, "Airdrop_server", menu)
     tray.run()
@@ -170,8 +192,8 @@ def start_tray():
 def send_clipboard():
     text = pyperclip.paste()
     if text.strip():
-        mail(text)
-        notify("Sent clipboard content via mail.")
+        trigger_pushcut_notification(text)
+        notify("Sent clipboard content via Pushcut.")
     else:
         notify("Clipboard is empty.")
 
@@ -179,12 +201,10 @@ keyboard.add_hotkey('ctrl+alt+s', send_clipboard)
 
 # Start Flask server in background
 def run_server():
-    mail(get_local_ip())
+    start_mdns_service()
     app.run(host="0.0.0.0", port=port)
-
 
 threading.Thread(target=run_server, daemon=True).start()
 # Launch tray icon (blocks)
 start_tray()
-print(get_local_ip())
 
