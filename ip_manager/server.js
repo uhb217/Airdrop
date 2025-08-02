@@ -13,6 +13,7 @@ app.post("/set", (req, res) => {
   if (!new_address)
     return res.status(400).json({ error: `Missing IP or port.`});
   address = new_address;
+  console.log(`New IP registered: ${address}`);
   res.send("IP registered successfully");
   interval = setInterval(checkStatus, 3000);
 });
