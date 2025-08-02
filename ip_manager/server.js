@@ -1,5 +1,4 @@
 const express = require("express");
-const { kill } = require("process");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -29,7 +28,7 @@ async function checkStatus() {
       address = null;
     }
   } catch (err) {
-    console.log("PC disconnected");
+    console.log("error connecting to PC:", err.message);
     clearInterval(interval);
     address = null;
   }
